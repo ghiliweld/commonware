@@ -22,6 +22,7 @@ num-traits = { workspace = true, optional = true }
 pin-project.workspace = true
 rand.workspace = true
 thiserror.workspace = true
+serde.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies.getrandom]
 # Enable "js" feature when WASM is target

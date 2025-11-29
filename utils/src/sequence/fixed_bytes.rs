@@ -7,6 +7,11 @@ use core::{
     hash::Hash,
     ops::Deref,
 };
+use serde::{
+    de::{Deserializer, Error as DeserializeError},
+    ser::Serializer,
+    Deserialize, Serialize,
+};
 use thiserror::Error;
 
 /// Errors returned by `Bytes` functions.
@@ -20,6 +25,36 @@ pub enum Error {
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 #[repr(transparent)]
 pub struct FixedBytes<const N: usize>([u8; N]);
+
+impl<const N: usize> Serialize for FixedBytes<N> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_bytes(&self.0)
+    }
+}
+
+impl<'de, const N: usize> Deserialize<'de> for FixedBytes<N> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let bytes: Vec<u8> = Vec::deserialize(deserializer)?;
+
+        if bytes.len() != N {
+            return Err(D::Error::invalid_length(
+                bytes.len(),
+                &format!("{}-byte array", N).as_str(),
+            ));
+        }
+
+        let mut arr = [0u8; N];
+        arr.copy_from_slice(&bytes);
+
+        Ok(FixedBytes(arr))
+    }
+}
 
 impl<const N: usize> FixedBytes<N> {
     /// Creates a new `FixedBytes` instance from an array of length `N`.
