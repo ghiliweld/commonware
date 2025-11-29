@@ -41,6 +41,11 @@ use core::{
     ptr,
 };
 use rand_core::CryptoRngCore;
+use serde::{
+    de::{Deserializer, Error as DeserializeError},
+    ser::Serializer,
+    Deserialize, Serialize,
+};
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// Domain separation tag used when hashing a message to a curve (G1 or G2).
@@ -127,6 +132,51 @@ const BLST_FR_ONE: Scalar = Scalar(blst_fr {
 #[repr(transparent)]
 pub struct G1(blst_p1);
 
+impl Serialize for G1 {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // 48-byte compressed G1 representation
+        let mut out = [0u8; G1_ELEMENT_BYTE_LENGTH];
+        unsafe {
+            blst::blst_p1_compress(out.as_mut_ptr(), &self.0);
+        }
+
+        // Serialize as a byte array (more efficient than hex)
+        serializer.serialize_bytes(&out)
+    }
+}
+
+impl<'de> Deserialize<'de> for G1 {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // Expect raw compressed bytes
+        let bytes: Vec<u8> = Vec::deserialize(deserializer)?;
+
+        if bytes.len() != G1_ELEMENT_BYTE_LENGTH {
+            return Err(D::Error::invalid_length(
+                bytes.len(),
+                &"48-byte compressed G1 point",
+            ));
+        }
+
+        let mut p_affine = blst_p1_affine::default();
+        let err = unsafe { blst_p1_uncompress(&mut p_affine, bytes.as_ptr()) };
+
+        if err != BLST_ERROR::BLST_SUCCESS {
+            return Err(D::Error::custom("invalid compressed G1 point"));
+        }
+
+        let mut p = blst_p1::default();
+        unsafe { blst_p1_from_affine(&mut p, &p_affine) };
+
+        Ok(G1(p))
+    }
+}
+
 /// The size in bytes of an encoded G1 element.
 pub const G1_ELEMENT_BYTE_LENGTH: usize = 48;
 
@@ -145,6 +195,51 @@ pub const G1_MESSAGE: DST = b"BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_POP_";
 #[derive(Clone, Copy, Eq, PartialEq)]
 #[repr(transparent)]
 pub struct G2(blst_p2);
+
+impl Serialize for G2 {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // 48-byte compressed G1 representation
+        let mut out = [0u8; G2_ELEMENT_BYTE_LENGTH];
+        unsafe {
+            blst::blst_p2_compress(out.as_mut_ptr(), &self.0);
+        }
+
+        // Serialize as a byte array (more efficient than hex)
+        serializer.serialize_bytes(&out)
+    }
+}
+
+impl<'de> Deserialize<'de> for G2 {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // Expect raw compressed bytes
+        let bytes: Vec<u8> = Vec::deserialize(deserializer)?;
+
+        if bytes.len() != G2_ELEMENT_BYTE_LENGTH {
+            return Err(D::Error::invalid_length(
+                bytes.len(),
+                &"96-byte compressed G2 point",
+            ));
+        }
+
+        let mut p_affine = blst_p2_affine::default();
+        let err = unsafe { blst_p2_uncompress(&mut p_affine, bytes.as_ptr()) };
+
+        if err != BLST_ERROR::BLST_SUCCESS {
+            return Err(D::Error::custom("invalid compressed G2 point"));
+        }
+
+        let mut p = blst_p2::default();
+        unsafe { blst_p2_from_affine(&mut p, &p_affine) };
+
+        Ok(G2(p))
+    }
+}
 
 /// The size in bytes of an encoded G2 element.
 pub const G2_ELEMENT_BYTE_LENGTH: usize = 96;
@@ -167,6 +262,41 @@ pub const G2_MESSAGE: DST = b"BLS_SIG_BLS12381G2_XMD:SHA-256_SSWU_RO_POP_";
 #[derive(Debug, Clone, Eq, PartialEq, Copy)]
 #[repr(transparent)]
 pub struct GT(blst_fp12);
+
+impl Serialize for GT {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let bytes = self.as_slice();
+        serializer.serialize_bytes(&bytes)
+    }
+}
+
+impl<'de> Deserialize<'de> for GT {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // Expect raw 576-byte in-memory blst_fp12 layout
+        let bytes: Vec<u8> = Vec::deserialize(deserializer)?;
+
+        if bytes.len() != GT_ELEMENT_BYTE_LENGTH {
+            return Err(D::Error::invalid_length(
+                bytes.len(),
+                &"576-byte GT element",
+            ));
+        }
+
+        let mut fp12 = blst_fp12::default();
+        unsafe {
+            let dst = &mut fp12 as *mut blst_fp12 as *mut u8;
+            core::ptr::copy_nonoverlapping(bytes.as_ptr(), dst, GT_ELEMENT_BYTE_LENGTH);
+        }
+
+        Ok(GT::from_blst_fp12(fp12))
+    }
+}
 
 /// The size in bytes of an encoded GT element.
 ///
